@@ -1,0 +1,52 @@
+{
+  "name": "@rafeekpro/gemini-autopm",
+  "version": "0.1.0",
+  "description": "AutoPM Framework for Gemini CLI - Intelligent Project Management with MCP",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "gemini-autopm": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "gemini-cli",
+    "mcp",
+    "model-context-protocol",
+    "project-management",
+    "agile",
+    "devops",
+    "automation",
+    "ai-agents"
+  ],
+  "author": "Rafeek Pro",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rafeekpro/GeminiAutoPM.git"
+  },
+  "bugs": {
+    "url": "https://github.com/rafeekpro/GeminiAutoPM/issues"
+  },
+  "homepage": "https://github.com/rafeekpro/GeminiAutoPM#readme",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/jest": "^29.5.14",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.5",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

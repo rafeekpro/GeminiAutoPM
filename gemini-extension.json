@@ -1,0 +1,21 @@
+{
+  "name": "gemini-autopm",
+  "version": "0.1.0",
+  "description": "Intelligent Project Management Framework for Gemini CLI",
+  "contextFileName": "GEMINI.md",
+  "mcpServers": {
+    "autopm-agents": {
+      "command": "node",
+      "args": ["${extensionPath}${/}dist${/}agents-server.js"],
+      "cwd": "${extensionPath}",
+      "description": "AutoPM Agent tools for code analysis, testing, and DevOps"
+    },
+    "autopm-pm": {
+      "command": "node",
+      "args": ["${extensionPath}${/}dist${/}pm-server.js"],
+      "cwd": "${extensionPath}",
+      "description": "Project Management tools for agile workflows"
+    }
+  },
+  "excludeTools": []
+}
