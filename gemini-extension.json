@@ -6,15 +6,15 @@
   "mcpServers": {
     "autopm-agents": {
       "command": "node",
-      "args": ["${extensionPath}${/}dist${/}agents-server.js"],
+      "args": ["${extensionPath}${/}dist${/}servers${/}agents-server.js"],
       "cwd": "${extensionPath}",
-      "description": "AutoPM Agent tools for code analysis, testing, and DevOps"
+      "description": "AutoPM Agent tools for code analysis, testing, and management"
     },
     "autopm-pm": {
       "command": "node",
-      "args": ["${extensionPath}${/}dist${/}pm-server.js"],
+      "args": ["${extensionPath}${/}dist${/}servers${/}pm-server.js"],
       "cwd": "${extensionPath}",
-      "description": "Project Management tools for agile workflows"
+      "description": "Project Management tools for agile workflows and epic decomposition"
     }
   },
   "excludeTools": []
