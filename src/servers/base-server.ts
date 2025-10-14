@@ -108,7 +108,7 @@ export abstract class BaseMCPServer {
           description: metadata.description,
           inputSchema: this.zodToShape(metadata.inputSchema),
         },
-        wrappedHandler
+        wrappedHandler as any
       );
 
       this.logger.info(`Registered tool: ${name} [${metadata.category}]`);
@@ -138,7 +138,7 @@ export abstract class BaseMCPServer {
           context7Docs = await this.context7.queryAll(queries);
         }
       } catch (error) {
-        this.logger.warn('Context7 query failed, continuing without docs', error as Error);
+        this.logger.warn(`Context7 query failed, continuing without docs: ${(error as Error).message}`);
         // Continue execution even if Context7 fails
       }
 

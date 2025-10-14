@@ -27,4 +27,8 @@ export default {
       statements: 80,
     },
   },
+  coverageReporters: ['text', 'lcov', 'html'],
+  verbose: true,
+  clearMocks: true,
+  restoreMocks: true,
 };

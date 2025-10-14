@@ -98,10 +98,9 @@ describe('Code Analyzer Agent', () => {
       const result = await executeCodeAnalyzer({
         task: 'Test',
         options: {
-          // @ts-expect-error - Testing error handling
-          invalid: () => {
+          invalid: (() => {
             throw new Error('Test error');
-          },
+          }) as any,
         },
       });
 
