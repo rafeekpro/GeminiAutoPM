@@ -18,12 +18,18 @@ import {
   prdExists,
   createEpicDir,
   getEpicFilePath,
+  getTaskFilePath,
+  epicExists,
+  listEpics,
+  listTasks,
 } from '../lib/file-ops.js';
 import {
   createPrdFrontmatter,
   stringifyFrontmatter,
   parsePrdFrontmatter,
   createEpicFrontmatter,
+  parseEpicFrontmatter,
+  parseTaskFrontmatter,
 } from '../lib/frontmatter.js';
 import {
   logSuccess,
@@ -596,37 +602,127 @@ ${prdData.content.includes('## Success Criteria')
         ],
         version: '0.1.0',
       },
-      async (params, context7Docs) => {
-        this.logger.info(`Showing epic: ${params.epicName}`);
+      async (params) => {
+        const epicName = sanitizeEpicName(params.epicName);
+        this.logger.info(`Showing epic: ${epicName}`);
 
-        // TODO: Implement epic show logic
-        // 1. Check if epic exists (.claude/epics/{epicName}/epic.md)
-        // 2. Read epic frontmatter and content
-        // 3. List tasks in epic directory
-        // 4. Calculate progress statistics
-        // 5. Format output with Context7 best practices
+        try {
+          // Check if epic exists
+          const exists = await epicExists(epicName);
+          if (!exists) {
+            return {
+              content: [{
+                type: 'text',
+                text: `❌ Epic not found: ${epicName}\n\n` +
+                      `Expected location: .claude/epics/${epicName}/epic.md\n\n` +
+                      `Available commands:\n` +
+                      `- List all epics: epic_list\n` +
+                      `- Create from PRD: prd_parse ${epicName}`,
+              }],
+              isError: true,
+            };
+          }
 
-        const placeholder = {
-          epicName: params.epicName,
-          status: 'open',
-          progress: 0,
-          totalTasks: 0,
-          completedTasks: 0,
-          tasks: [],
-          message: 'Epic show implementation in progress (Phase 1)',
-        };
+          // Read epic file
+          const epicPath = getEpicFilePath(epicName);
+          const epicMarkdown = await readFile(epicPath);
+          const epicData = parseEpicFrontmatter(epicMarkdown);
 
-        return {
-          content: [{
-            type: 'text',
-            text: `# Epic: ${params.epicName}\n\n` +
-                  `Status: ${placeholder.status}\n` +
-                  `Progress: ${placeholder.progress}%\n` +
-                  `Tasks: ${placeholder.totalTasks} (${placeholder.completedTasks} completed)\n\n` +
-                  `⚠️  ${placeholder.message}`,
-          }],
-          structuredContent: placeholder,
-        };
+          // List tasks
+          const taskFiles = await listTasks(epicName);
+          const tasks = [];
+
+          for (const taskFile of taskFiles) {
+            const taskNumber = taskFile.replace('.md', '');
+            const taskPath = getTaskFilePath(epicName, taskNumber);
+            const taskMarkdown = await readFile(taskPath);
+            const taskData = parseTaskFrontmatter(taskMarkdown);
+
+            tasks.push({
+              number: taskFile.replace('.md', ''),
+              name: taskData.data.name,
+              status: taskData.data.status,
+              effort: taskData.data.effort,
+              depends_on: taskData.data.depends_on,
+            });
+          }
+
+          // Calculate statistics
+          const totalTasks = tasks.length;
+          const completedTasks = tasks.filter(t => t.status === 'completed').length;
+          const inProgressTasks = tasks.filter(t => t.status === 'in-progress').length;
+          const blockedTasks = tasks.filter(t => t.status === 'blocked').length;
+
+          // Format output
+          let output = `# Epic: ${epicData.data.name}\n\n`;
+          output += `**Status**: ${epicData.data.status}\n`;
+          output += `**Progress**: ${epicData.data.progress}%\n`;
+          output += `**Created**: ${new Date(epicData.data.created).toLocaleDateString()}\n`;
+          output += `**Updated**: ${new Date(epicData.data.updated).toLocaleDateString()}\n\n`;
+
+          output += `## Task Summary\n`;
+          output += `- Total: ${totalTasks}\n`;
+          output += `- Completed: ${completedTasks}\n`;
+          output += `- In Progress: ${inProgressTasks}\n`;
+          output += `- Blocked: ${blockedTasks}\n`;
+          output += `- Open: ${totalTasks - completedTasks - inProgressTasks - blockedTasks}\n\n`;
+
+          if (tasks.length > 0) {
+            output += `## Tasks\n\n`;
+            for (const task of tasks) {
+              const statusEmoji = {
+                'open': '⚪',
+                'in-progress': '🔵',
+                'completed': '✅',
+                'blocked': '🔴',
+              }[task.status] || '⚪';
+
+              output += `${statusEmoji} **${task.number}**: ${task.name}`;
+              if (task.effort) {
+                output += ` [${task.effort.toUpperCase()}]`;
+              }
+              output += `\n`;
+
+              if (params.verbose && task.depends_on && task.depends_on.length > 0) {
+                output += `   Dependencies: ${task.depends_on.join(', ')}\n`;
+              }
+            }
+          } else {
+            output += `## Tasks\n\n`;
+            output += `No tasks yet. Use \`epic_decompose ${epicName}\` to break down this epic into tasks.\n`;
+          }
+
+          output += `\n## Epic Content\n\n`;
+          output += epicData.content.trim();
+
+          return {
+            content: [{
+              type: 'text',
+              text: output,
+            }],
+            structuredContent: {
+              epicName: epicData.data.name,
+              status: epicData.data.status,
+              progress: epicData.data.progress,
+              totalTasks,
+              completedTasks,
+              inProgressTasks,
+              blockedTasks,
+              tasks,
+            },
+          };
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          this.logger.error(`Failed to show epic: ${errorMessage}`);
+
+          return {
+            content: [{
+              type: 'text',
+              text: `❌ Failed to show epic: ${epicName}\n\nError: ${errorMessage}`,
+            }],
+            isError: true,
+          };
+        }
       }
     );
   }
@@ -666,39 +762,137 @@ ${prdData.content.includes('## Success Criteria')
         ],
         version: '0.1.0',
       },
-      async (params, context7Docs) => {
-        this.logger.info(`Listing epics (filter: ${params.status || 'all'})`);
+      async (params) => {
+        const filterStatus = params.status || 'all';
+        const sortBy = params.sortBy || 'name';
+        this.logger.info(`Listing epics (filter: ${filterStatus}, sort: ${sortBy})`);
 
-        // TODO: Implement epic list logic
-        // 1. Scan .claude/epics/ directory
-        // 2. Read frontmatter from each epic.md
-        // 3. Filter by status if specified
-        // 4. Sort by specified field
-        // 5. Format summary list with Context7 best practices
+        try {
+          // Get all epic names
+          const epicNames = await listEpics();
 
-        const placeholder = {
-          epics: [],
-          total: 0,
-          byStatus: {
-            open: 0,
-            'in-progress': 0,
-            completed: 0,
-          },
-          message: 'Epic list implementation in progress (Phase 1)',
-        };
+          if (epicNames.length === 0) {
+            return {
+              content: [{
+                type: 'text',
+                text: `# Project Epics\n\n` +
+                      `No epics found.\n\n` +
+                      `Create your first epic:\n` +
+                      `1. Create PRD: prd_new\n` +
+                      `2. Convert to Epic: prd_parse`,
+              }],
+            };
+          }
 
-        return {
-          content: [{
-            type: 'text',
-            text: `# Project Epics\n\n` +
-                  `Total: ${placeholder.total}\n` +
-                  `Open: ${placeholder.byStatus.open}\n` +
-                  `In Progress: ${placeholder.byStatus['in-progress']}\n` +
-                  `Completed: ${placeholder.byStatus.completed}\n\n` +
-                  `⚠️  ${placeholder.message}`,
-          }],
-          structuredContent: placeholder,
-        };
+          // Read all epic frontmatter
+          const epics = [];
+          for (const epicName of epicNames) {
+            try {
+              const epicPath = getEpicFilePath(epicName);
+              const epicMarkdown = await readFile(epicPath);
+              const epicData = parseEpicFrontmatter(epicMarkdown);
+
+              // Count tasks
+              const taskFiles = await listTasks(epicName);
+              const totalTasks = taskFiles.length;
+
+              epics.push({
+                name: epicData.data.name,
+                status: epicData.data.status,
+                progress: epicData.data.progress,
+                totalTasks,
+                completedTasks: epicData.data.completedTasks || 0,
+                created: epicData.data.created,
+                updated: epicData.data.updated,
+              });
+            } catch (error) {
+              this.logger.warn(`Failed to read epic: ${epicName} - ${error}`);
+            }
+          }
+
+          // Filter by status
+          let filteredEpics = epics;
+          if (filterStatus !== 'all') {
+            filteredEpics = epics.filter(e => e.status === filterStatus);
+          }
+
+          // Sort epics
+          filteredEpics.sort((a, b) => {
+            switch (sortBy) {
+              case 'progress':
+                return b.progress - a.progress;
+              case 'created':
+                return new Date(b.created).getTime() - new Date(a.created).getTime();
+              case 'updated':
+                return new Date(b.updated).getTime() - new Date(a.updated).getTime();
+              case 'name':
+              default:
+                return a.name.localeCompare(b.name);
+            }
+          });
+
+          // Count by status
+          const byStatus = {
+            open: epics.filter(e => e.status === 'open').length,
+            'in-progress': epics.filter(e => e.status === 'in-progress').length,
+            completed: epics.filter(e => e.status === 'completed').length,
+            blocked: epics.filter(e => e.status === 'blocked').length,
+          };
+
+          // Format output
+          let output = `# Project Epics\n\n`;
+          output += `**Total**: ${epics.length} epics\n`;
+          output += `**Filter**: ${filterStatus}\n`;
+          output += `**Sort**: ${sortBy}\n\n`;
+
+          output += `## Status Summary\n`;
+          output += `- 🟢 Open: ${byStatus.open}\n`;
+          output += `- 🔵 In Progress: ${byStatus['in-progress']}\n`;
+          output += `- ✅ Completed: ${byStatus.completed}\n`;
+          output += `- 🔴 Blocked: ${byStatus.blocked}\n\n`;
+
+          if (filteredEpics.length > 0) {
+            output += `## Epics\n\n`;
+            for (const epic of filteredEpics) {
+              const statusEmoji = {
+                'open': '🟢',
+                'in-progress': '🔵',
+                'completed': '✅',
+                'blocked': '🔴',
+              }[epic.status] || '⚪';
+
+              output += `${statusEmoji} **${epic.name}**\n`;
+              output += `   Progress: ${epic.progress}% | Tasks: ${epic.completedTasks}/${epic.totalTasks}\n`;
+              output += `   Updated: ${new Date(epic.updated).toLocaleDateString()}\n\n`;
+            }
+          } else {
+            output += `No epics match filter: ${filterStatus}\n`;
+          }
+
+          return {
+            content: [{
+              type: 'text',
+              text: output,
+            }],
+            structuredContent: {
+              epics: filteredEpics,
+              total: epics.length,
+              filtered: filteredEpics.length,
+              byStatus,
+            },
+          };
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          this.logger.error(`Failed to list epics: ${errorMessage}`);
+
+          return {
+            content: [{
+              type: 'text',
+              text: `❌ Failed to list epics\n\nError: ${errorMessage}`,
+            }],
+            isError: true,
+          };
+        }
       }
     );
   }
@@ -731,44 +925,173 @@ ${prdData.content.includes('## Success Criteria')
         ],
         version: '0.1.0',
       },
-      async (params, context7Docs) => {
-        this.logger.info(`Checking status for epic: ${params.epicName}`);
+      async (params) => {
+        const epicName = sanitizeEpicName(params.epicName);
+        this.logger.info(`Checking status for epic: ${epicName}`);
 
-        // TODO: Implement epic status logic
-        // 1. Read epic frontmatter
-        // 2. Count tasks by status
-        // 3. Identify blocked tasks
-        // 4. Identify next actionable tasks
-        // 5. Calculate velocity/progress
-        // 6. Format quick status report with Context7 best practices
+        try {
+          // Check if epic exists
+          const exists = await epicExists(epicName);
+          if (!exists) {
+            return {
+              content: [{
+                type: 'text',
+                text: `❌ Epic not found: ${epicName}\n\n` +
+                      `Expected location: .claude/epics/${epicName}/epic.md\n\n` +
+                      `Use epic_list to see all available epics.`,
+              }],
+              isError: true,
+            };
+          }
 
-        const placeholder = {
-          epicName: params.epicName,
-          status: 'not-started',
-          progress: 0,
-          totalTasks: 0,
-          completedTasks: 0,
-          inProgressTasks: 0,
-          blockedTasks: 0,
-          nextTasks: [],
-          message: 'Epic status implementation in progress (Phase 1)',
-        };
+          // Read epic file
+          const epicPath = getEpicFilePath(epicName);
+          const epicMarkdown = await readFile(epicPath);
+          const epicData = parseEpicFrontmatter(epicMarkdown);
 
-        return {
-          content: [{
-            type: 'text',
-            text: `# Epic Status: ${params.epicName}\n\n` +
-                  `Status: ${placeholder.status}\n` +
-                  `Progress: ${placeholder.progress}%\n\n` +
-                  `Tasks:\n` +
-                  `- Total: ${placeholder.totalTasks}\n` +
-                  `- Completed: ${placeholder.completedTasks}\n` +
-                  `- In Progress: ${placeholder.inProgressTasks}\n` +
-                  `- Blocked: ${placeholder.blockedTasks}\n\n` +
-                  `⚠️  ${placeholder.message}`,
-          }],
-          structuredContent: placeholder,
-        };
+          // Read all tasks and categorize
+          const taskFiles = await listTasks(epicName);
+          const tasks = {
+            open: [] as Array<{number: string, name: string, depends_on?: string[]}>,
+            inProgress: [] as Array<{number: string, name: string}>,
+            completed: [] as Array<{number: string, name: string}>,
+            blocked: [] as Array<{number: string, name: string, reason?: string}>,
+          };
+
+          for (const taskFile of taskFiles) {
+            try {
+              const taskNumber = taskFile.replace('.md', '');
+              const taskPath = getTaskFilePath(epicName, taskNumber);
+              const taskMarkdown = await readFile(taskPath);
+              const taskData = parseTaskFrontmatter(taskMarkdown);
+
+              const taskInfo = {
+                number: taskNumber,
+                name: taskData.data.name,
+                depends_on: taskData.data.depends_on,
+              };
+
+              switch (taskData.data.status) {
+                case 'completed':
+                  tasks.completed.push(taskInfo);
+                  break;
+                case 'in-progress':
+                  tasks.inProgress.push(taskInfo);
+                  break;
+                case 'blocked':
+                  tasks.blocked.push(taskInfo);
+                  break;
+                default:
+                  tasks.open.push(taskInfo);
+              }
+            } catch (error) {
+              this.logger.warn(`Failed to read task: ${taskFile} - ${error}`);
+            }
+          }
+
+          // Find next actionable tasks (no unmet dependencies)
+          const completedTaskNumbers = new Set(tasks.completed.map(t => t.number));
+          const nextTasks = tasks.open.filter(task => {
+            if (!task.depends_on || task.depends_on.length === 0) {
+              return true;
+            }
+            return task.depends_on.every(dep => completedTaskNumbers.has(dep));
+          });
+
+          // Calculate statistics
+          const totalTasks = taskFiles.length;
+          const completedCount = tasks.completed.length;
+          const inProgressCount = tasks.inProgress.length;
+          const blockedCount = tasks.blocked.length;
+          const openCount = tasks.open.length;
+
+          // Format output
+          let output = `# Epic Status: ${epicData.data.name}\n\n`;
+
+          const statusEmoji = {
+            'open': '🟢',
+            'in-progress': '🔵',
+            'completed': '✅',
+            'blocked': '🔴',
+          }[epicData.data.status] || '⚪';
+
+          output += `${statusEmoji} **Status**: ${epicData.data.status}\n`;
+          output += `📊 **Progress**: ${epicData.data.progress}%\n`;
+          output += `📅 **Updated**: ${new Date(epicData.data.updated).toLocaleDateString()}\n\n`;
+
+          output += `## Task Breakdown\n`;
+          output += `- ✅ Completed: ${completedCount}\n`;
+          output += `- 🔵 In Progress: ${inProgressCount}\n`;
+          output += `- ⚪ Open: ${openCount}\n`;
+          output += `- 🔴 Blocked: ${blockedCount}\n`;
+          output += `- 📦 Total: ${totalTasks}\n\n`;
+
+          if (blockedCount > 0) {
+            output += `## ⚠️  Blocked Tasks\n`;
+            for (const task of tasks.blocked) {
+              output += `- **${task.number}**: ${task.name}\n`;
+            }
+            output += `\n`;
+          }
+
+          if (inProgressCount > 0) {
+            output += `## 🔵 In Progress\n`;
+            for (const task of tasks.inProgress) {
+              output += `- **${task.number}**: ${task.name}\n`;
+            }
+            output += `\n`;
+          }
+
+          if (nextTasks.length > 0) {
+            output += `## 🎯 Next Actions (Ready to Start)\n`;
+            for (const task of nextTasks.slice(0, 5)) {
+              output += `- **${task.number}**: ${task.name}`;
+              if (task.depends_on && task.depends_on.length > 0) {
+                output += ` (deps: ${task.depends_on.join(', ')})`;
+              }
+              output += `\n`;
+            }
+            if (nextTasks.length > 5) {
+              output += `\n*... and ${nextTasks.length - 5} more*\n`;
+            }
+          } else if (openCount > 0) {
+            output += `## ⏸️  Waiting on Dependencies\n`;
+            output += `All open tasks have unmet dependencies.\n`;
+          }
+
+          if (completedCount === totalTasks && totalTasks > 0) {
+            output += `\n🎉 **All tasks completed!** Consider closing this epic.\n`;
+          }
+
+          return {
+            content: [{
+              type: 'text',
+              text: output,
+            }],
+            structuredContent: {
+              epicName: epicData.data.name,
+              status: epicData.data.status,
+              progress: epicData.data.progress,
+              totalTasks,
+              completedTasks: completedCount,
+              inProgressTasks: inProgressCount,
+              blockedTasks: blockedCount,
+              openTasks: openCount,
+              nextTasks: nextTasks.map(t => ({ number: t.number, name: t.name })),
+            },
+          };
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          this.logger.error(`Failed to get epic status: ${errorMessage}`);
+
+          return {
+            content: [{
+              type: 'text',
+              text: `❌ Failed to get epic status: ${epicName}\n\nError: ${errorMessage}`,
+            }],
+            isError: true,
+          };
+        }
       }
     );
   }
