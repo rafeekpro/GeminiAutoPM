@@ -148,7 +148,8 @@ export async function prdExists(featureName: string, workingDir: string = proces
  * Best Practice: Returns string with utf8 encoding
  */
 export async function readFile(filePath: string): Promise<string> {
-  return fs.readFile(filePath, 'utf8');
+  const content = await fs.readFile(filePath, 'utf8');
+  return content;
 }
 
 /**
