@@ -80,7 +80,7 @@ export interface MemoryBankEntry {
 /**
  * Get Memory Bank file path
  */
-export function getMemoryBankPath(workingDir: string = process.cwd()): string {
+export function getMemoryBankPath(workingDir?: string): string {
   return path.join(getClaudeDir(workingDir), 'memory_bank.md');
 }
 
@@ -88,7 +88,7 @@ export function getMemoryBankPath(workingDir: string = process.cwd()): string {
  * Initialize Memory Bank file
  * Creates memory_bank.md with header
  */
-export async function initMemoryBank(workingDir: string = process.cwd()): Promise<void> {
+export async function initMemoryBank(workingDir?: string): Promise<void> {
   const memoryBankPath = getMemoryBankPath(workingDir);
 
   if (await pathExists(memoryBankPath)) {
@@ -118,7 +118,7 @@ export async function initMemoryBank(workingDir: string = process.cwd()): Promis
  */
 export async function logToMemoryBank(
   entry: MemoryBankEntry,
-  workingDir: string = process.cwd()
+  workingDir?: string
 ): Promise<void> {
   const memoryBankPath = getMemoryBankPath(workingDir);
 
@@ -194,7 +194,7 @@ export async function logSuccess(
   operation: MemoryBankOperation | string,
   details: string,
   context?: Record<string, any>,
-  workingDir: string = process.cwd()
+  workingDir?: string
 ): Promise<void> {
   const entry = createMemoryEntry(operation, details, context, true);
   await logToMemoryBank(entry, workingDir);
@@ -208,7 +208,7 @@ export async function logError(
   details: string,
   error: string,
   context?: Record<string, any>,
-  workingDir: string = process.cwd()
+  workingDir?: string
 ): Promise<void> {
   const entry = createMemoryEntry(operation, details, context, false, error);
   await logToMemoryBank(entry, workingDir);
@@ -223,7 +223,7 @@ export async function logError(
  */
 export async function readRecentEntries(
   limit: number = 10,
-  workingDir: string = process.cwd()
+  workingDir?: string
 ): Promise<string[]> {
   const memoryBankPath = getMemoryBankPath(workingDir);
 
@@ -252,7 +252,7 @@ export async function readRecentEntries(
  */
 export async function searchMemoryBank(
   operation: MemoryBankOperation | string,
-  workingDir: string = process.cwd()
+  workingDir?: string
 ): Promise<string[]> {
   const memoryBankPath = getMemoryBankPath(workingDir);
 
@@ -273,7 +273,7 @@ export async function searchMemoryBank(
  * Get Memory Bank statistics
  */
 export async function getMemoryBankStats(
-  workingDir: string = process.cwd()
+  workingDir?: string
 ): Promise<{
   totalEntries: number;
   successfulOperations: number;
@@ -320,7 +320,7 @@ export async function getMemoryBankStats(
  * Clear Memory Bank (use with caution)
  * Reinitializes with header only
  */
-export async function clearMemoryBank(workingDir: string = process.cwd()): Promise<void> {
+export async function clearMemoryBank(workingDir?: string): Promise<void> {
   const memoryBankPath = getMemoryBankPath(workingDir);
 
   // Remove existing file

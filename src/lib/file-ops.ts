@@ -30,43 +30,53 @@ import path from 'path';
 /**
  * Get the .claude directory path
  * CRITICAL: Always uses .claude/ path (never autopm/)
+ *
+ * Working Directory Priority:
+ * 1. Explicit workingDir parameter
+ * 2. GEMINI_WORKSPACE environment variable
+ * 3. AUTOPM_WORKSPACE environment variable
+ * 4. process.cwd() (fallback)
  */
-export function getClaudeDir(workingDir: string = process.cwd()): string {
-  return path.join(workingDir, '.claude');
+export function getClaudeDir(workingDir?: string): string {
+  const effectiveWorkingDir = workingDir
+    || process.env.GEMINI_WORKSPACE
+    || process.env.AUTOPM_WORKSPACE
+    || process.cwd();
+  return path.join(effectiveWorkingDir, '.claude');
 }
 
 /**
  * Get the .claude/epics directory path
  */
-export function getEpicsDir(workingDir: string = process.cwd()): string {
+export function getEpicsDir(workingDir?: string): string {
   return path.join(getClaudeDir(workingDir), 'epics');
 }
 
 /**
  * Get the .claude/prds directory path
  */
-export function getPrdsDir(workingDir: string = process.cwd()): string {
+export function getPrdsDir(workingDir?: string): string {
   return path.join(getClaudeDir(workingDir), 'prds');
 }
 
 /**
  * Get specific epic directory path
  */
-export function getEpicDir(epicName: string, workingDir: string = process.cwd()): string {
+export function getEpicDir(epicName: string, workingDir?: string): string {
   return path.join(getEpicsDir(workingDir), epicName);
 }
 
 /**
  * Get epic.md file path for a specific epic
  */
-export function getEpicFilePath(epicName: string, workingDir: string = process.cwd()): string {
+export function getEpicFilePath(epicName: string, workingDir?: string): string {
   return path.join(getEpicDir(epicName, workingDir), 'epic.md');
 }
 
 /**
  * Get PRD file path for a specific feature
  */
-export function getPrdFilePath(featureName: string, workingDir: string = process.cwd()): string {
+export function getPrdFilePath(featureName: string, workingDir?: string): string {
   return path.join(getPrdsDir(workingDir), `${featureName}.md`);
 }
 
@@ -76,7 +86,7 @@ export function getPrdFilePath(featureName: string, workingDir: string = process
 export function getTaskFilePath(
   epicName: string,
   taskNumber: string,
-  workingDir: string = process.cwd()
+  workingDir?: string
 ): string {
   return path.join(getEpicDir(epicName, workingDir), `${taskNumber}.md`);
 }
@@ -90,7 +100,7 @@ export function getTaskFilePath(
  *
  * Best Practice: Uses ensureDir() which creates parent dirs if needed
  */
-export async function initClaudeStructure(workingDir: string = process.cwd()): Promise<void> {
+export async function initClaudeStructure(workingDir?: string): Promise<void> {
   const claudeDir = getClaudeDir(workingDir);
   const epicsDir = getEpicsDir(workingDir);
   const prdsDir = getPrdsDir(workingDir);
@@ -103,7 +113,7 @@ export async function initClaudeStructure(workingDir: string = process.cwd()): P
 /**
  * Check if .claude structure is initialized
  */
-export async function isClaudeInitialized(workingDir: string = process.cwd()): Promise<boolean> {
+export async function isClaudeInitialized(workingDir?: string): Promise<boolean> {
   const claudeDir = getClaudeDir(workingDir);
   const epicsDir = getEpicsDir(workingDir);
   const prdsDir = getPrdsDir(workingDir);
@@ -121,7 +131,7 @@ export async function isClaudeInitialized(workingDir: string = process.cwd()): P
  * Create epic directory
  * Best Practice: Uses ensureDir() for automatic parent creation
  */
-export async function createEpicDir(epicName: string, workingDir: string = process.cwd()): Promise<string> {
+export async function createEpicDir(epicName: string, workingDir?: string): Promise<string> {
   const epicDir = getEpicDir(epicName, workingDir);
   await fs.ensureDir(epicDir);
   return epicDir;
@@ -130,7 +140,7 @@ export async function createEpicDir(epicName: string, workingDir: string = proce
 /**
  * Check if epic exists
  */
-export async function epicExists(epicName: string, workingDir: string = process.cwd()): Promise<boolean> {
+export async function epicExists(epicName: string, workingDir?: string): Promise<boolean> {
   const epicFilePath = getEpicFilePath(epicName, workingDir);
   return fs.pathExists(epicFilePath);
 }
@@ -138,7 +148,7 @@ export async function epicExists(epicName: string, workingDir: string = process.
 /**
  * Check if PRD exists
  */
-export async function prdExists(featureName: string, workingDir: string = process.cwd()): Promise<boolean> {
+export async function prdExists(featureName: string, workingDir?: string): Promise<boolean> {
   const prdFilePath = getPrdFilePath(featureName, workingDir);
   return fs.pathExists(prdFilePath);
 }
@@ -164,7 +174,7 @@ export async function writeFile(filePath: string, content: string): Promise<void
  * List all epics
  * Returns epic names (directory names)
  */
-export async function listEpics(workingDir: string = process.cwd()): Promise<string[]> {
+export async function listEpics(workingDir?: string): Promise<string[]> {
   const epicsDir = getEpicsDir(workingDir);
 
   if (!(await fs.pathExists(epicsDir))) {
@@ -181,7 +191,7 @@ export async function listEpics(workingDir: string = process.cwd()): Promise<str
  * List all PRDs
  * Returns PRD names (without .md extension)
  */
-export async function listPrds(workingDir: string = process.cwd()): Promise<string[]> {
+export async function listPrds(workingDir?: string): Promise<string[]> {
   const prdsDir = getPrdsDir(workingDir);
 
   if (!(await fs.pathExists(prdsDir))) {
@@ -198,7 +208,7 @@ export async function listPrds(workingDir: string = process.cwd()): Promise<stri
  * List all tasks in an epic
  * Returns task file names (e.g., ['001.md', '002.md'])
  */
-export async function listTasks(epicName: string, workingDir: string = process.cwd()): Promise<string[]> {
+export async function listTasks(epicName: string, workingDir?: string): Promise<string[]> {
   const epicDir = getEpicDir(epicName, workingDir);
 
   if (!(await fs.pathExists(epicDir))) {
@@ -216,7 +226,7 @@ export async function listTasks(epicName: string, workingDir: string = process.c
  * Delete epic directory and all contents
  * Best Practice: Uses remove() which handles directories recursively
  */
-export async function deleteEpic(epicName: string, workingDir: string = process.cwd()): Promise<void> {
+export async function deleteEpic(epicName: string, workingDir?: string): Promise<void> {
   const epicDir = getEpicDir(epicName, workingDir);
   await fs.remove(epicDir);
 }
@@ -224,7 +234,7 @@ export async function deleteEpic(epicName: string, workingDir: string = process.
 /**
  * Delete PRD file
  */
-export async function deletePrd(featureName: string, workingDir: string = process.cwd()): Promise<void> {
+export async function deletePrd(featureName: string, workingDir?: string): Promise<void> {
   const prdFilePath = getPrdFilePath(featureName, workingDir);
   await fs.remove(prdFilePath);
 }
