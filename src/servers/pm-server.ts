@@ -38,6 +38,7 @@ import {
   initMemoryBank,
 } from '../lib/memory-bank.js';
 import { sanitizeEpicName, validateEpicName } from '../lib/validation.js';
+import { generateComprehensivePRD, type PRDInput } from '../lib/prd-generator.js';
 
 /**
  * Project Management MCP Server
@@ -271,40 +272,28 @@ export class PMServer extends BaseMCPServer {
             };
           }
 
-          // Create PRD frontmatter
-          const frontmatter = createPrdFrontmatter(featureName, {
-            status: 'draft',
-          });
+          // Generate comprehensive PRD using ClaudeAutoPM logic
+          const prdInput: PRDInput = {
+            featureName,
+            executiveSummary: params.executiveSummary,
+            problemStatement: params.problemStatement,
+            successCriteria: params.successCriteria,
+            userStories: params.userStories,
+            acceptanceCriteria: params.acceptanceCriteria,
+            outOfScope: params.outOfScope,
+            technicalConsiderations: params.technicalConsiderations,
+          };
 
-          // Build PRD content
-          const prdContent = `
-## Executive Summary
-${params.executiveSummary}
+          const enrichedPRD = generateComprehensivePRD(prdInput);
 
-## Problem Statement
-${params.problemStatement}
-
-## Success Criteria
-${params.successCriteria}
-
-## User Stories
-${params.userStories}
-
-## Acceptance Criteria
-${params.acceptanceCriteria}
-
-## Out of Scope
-${params.outOfScope || 'To be defined during implementation planning'}
-
-## Technical Considerations
-${params.technicalConsiderations || 'To be defined during technical design phase'}
-
----
-*Created with GeminiAutoPM MCP Server*
-`;
+          // Create PRD frontmatter (using generated data)
+          const frontmatter = {
+            ...enrichedPRD.frontmatter,
+            name: featureName, // Ensure consistent naming
+          };
 
           // Combine frontmatter and content
-          const prdMarkdown = stringifyFrontmatter(frontmatter, prdContent);
+          const prdMarkdown = stringifyFrontmatter(frontmatter, enrichedPRD.content);
 
           // Write PRD file
           const prdPath = getPrdFilePath(featureName);
@@ -313,21 +302,48 @@ ${params.technicalConsiderations || 'To be defined during technical design phase
           // Log to memory bank
           await logSuccess(
             MemoryBankOperation.PRD_NEW,
-            `Created PRD for feature: ${featureName}`,
+            `Created comprehensive PRD for feature: ${featureName}`,
             {
               featureName,
               status: frontmatter.status,
-              sections: ['Executive Summary', 'Problem Statement', 'Success Criteria', 'User Stories', 'Acceptance Criteria'],
+              priority: frontmatter.priority,
+              timeline: frontmatter.timeline,
+              sections: [
+                'Executive Summary',
+                'Problem Statement',
+                'Target Users',
+                'Key Features (Must/Should/Nice to Have)',
+                'Success Metrics',
+                'Acceptance Criteria',
+                'Technical Requirements',
+                'Implementation Plan',
+                'Risks and Mitigation',
+                'Open Questions',
+                'Appendix',
+              ],
             }
           );
 
           return {
             content: [{
               type: 'text',
-              text: `✅ PRD created successfully\n\n` +
+              text: `✅ Comprehensive PRD created successfully\n\n` +
                     `Feature: ${featureName}\n` +
                     `Location: .claude/prds/${featureName}.md\n` +
-                    `Status: draft\n\n` +
+                    `Status: ${frontmatter.status}\n` +
+                    `Priority: ${frontmatter.priority}\n` +
+                    `Timeline: ${frontmatter.timeline}\n\n` +
+                    `📋 Generated Sections:\n` +
+                    `- Executive Summary & Problem Statement\n` +
+                    `- Target Users & User Personas\n` +
+                    `- Key Features (Must/Should/Nice to Have)\n` +
+                    `- Success Metrics & KPIs\n` +
+                    `- Acceptance Criteria\n` +
+                    `- Technical Requirements & Architecture\n` +
+                    `- Implementation Plan (4 phases)\n` +
+                    `- Risks & Mitigation Strategies\n` +
+                    `- Open Questions\n` +
+                    `- Appendix & References\n\n` +
                     `Next steps:\n` +
                     `1. Review and refine the PRD\n` +
                     `2. Convert to Epic: prd_parse ${featureName}\n` +
