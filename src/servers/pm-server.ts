@@ -9,6 +9,29 @@ import { z } from 'zod';
 import { BaseMCPServer, type ServerConfig } from './base-server.js';
 import { ToolCategory } from '../registry/tool-registry.js';
 import { buildEpicDecomposePrompt } from '../prompts/pm/epic-decompose.js';
+import {
+  initClaudeStructure,
+  isClaudeInitialized,
+  getPrdFilePath,
+  writeFile,
+  readFile,
+  prdExists,
+  createEpicDir,
+  getEpicFilePath,
+} from '../lib/file-ops.js';
+import {
+  createPrdFrontmatter,
+  stringifyFrontmatter,
+  parsePrdFrontmatter,
+  createEpicFrontmatter,
+} from '../lib/frontmatter.js';
+import {
+  logSuccess,
+  logError,
+  MemoryBankOperation,
+  initMemoryBank,
+} from '../lib/memory-bank.js';
+import { sanitizeEpicName, validateEpicName } from '../lib/validation.js';
 
 /**
  * Project Management MCP Server
@@ -38,34 +61,444 @@ export class PMServer extends BaseMCPServer {
    * Phase 1: Core Epic Tools
    */
   protected initializeTools(): void {
-    this.logger.info('Initializing PM tools (Phase 1: Core Epic Tools)...');
+    this.logger.info('Initializing PM tools (Phase 1 Revised: PRD → Epic Workflow)...');
 
-    // Phase 1: Core Epic Management
+    // Phase 0: Initialization
+    this.registerPMInit();           // 🆕 Initialize .claude structure
+
+    // Phase 1: PRD Creation (PRIORITY - Entry Point)
+    this.registerPRDNew();           // 🆕 Create new PRD
+    this.registerPRDParse();         // 🆕 Convert PRD to Epic
+
+    // Phase 2: Epic Management
     this.registerEpicDecompose();  // ✅ Already implemented
     this.registerEpicShow();         // 🆕 Display epic details
     this.registerEpicList();         // 🆕 List all epics
     this.registerEpicStatus();       // 🆕 Quick status overview
 
-    // Phase 2: Epic Lifecycle (TODO)
+    // Phase 3: Epic Lifecycle (TODO)
     // this.registerEpicStart();
     // this.registerEpicClose();
     // this.registerEpicEdit();
     // this.registerEpicSync();
 
-    // Phase 3: Issue/Task Management (TODO)
+    // Phase 4: Issue/Task Management (TODO)
     // this.registerIssueStart();
     // this.registerIssueSync();
 
-    // Phase 4: PRD & Context (TODO)
-    // this.registerPRDNew();
-    // this.registerPRDParse();
-
-    // Phase 5: Workflow & Utilities (TODO)
-    // this.registerInit();
-    // this.registerStatus();
-
     const stats = this.registry.getStats();
     this.logger.info(`PM Server initialized with ${stats.totalTools} tools`);
+  }
+
+  /**
+   * Register PM Init Tool
+   * Initialize .claude directory structure
+   */
+  private registerPMInit(): void {
+    this.registerTool(
+      'pm_init',
+      {
+        name: 'pm_init',
+        category: ToolCategory.PM,
+        description: 'Initialize .claude directory structure for PM workflow (epics, prds, memory bank)',
+        inputSchema: z.object({
+          workingDir: z.string().optional().describe('Working directory (defaults to current directory)'),
+        }),
+        context7Queries: [
+          'mcp://context7/project-management/project-setup',
+          'mcp://context7/agile/workflow-initialization',
+        ],
+        examples: [
+          {
+            description: 'Initialize PM structure in current directory',
+            input: {},
+            expectedOutput: 'Created .claude/epics, .claude/prds, and memory_bank.md',
+          },
+        ],
+        version: '0.1.0',
+      },
+      async (params) => {
+        const workingDir = params.workingDir || process.cwd();
+
+        try {
+          // Check if already initialized
+          const initialized = await isClaudeInitialized(workingDir);
+          if (initialized) {
+            await logSuccess(
+              MemoryBankOperation.PM_INIT,
+              'PM structure already initialized',
+              { workingDir },
+              workingDir
+            );
+
+            return {
+              content: [{
+                type: 'text',
+                text: '✅ PM structure already initialized\n\n' +
+                      'Directory structure:\n' +
+                      '- .claude/epics/\n' +
+                      '- .claude/prds/\n' +
+                      '- .claude/memory_bank.md',
+              }],
+            };
+          }
+
+          // Initialize structure
+          await initClaudeStructure(workingDir);
+          await initMemoryBank(workingDir);
+
+          await logSuccess(
+            MemoryBankOperation.PM_INIT,
+            'PM structure initialized successfully',
+            { workingDir },
+            workingDir
+          );
+
+          return {
+            content: [{
+              type: 'text',
+              text: '✅ PM structure initialized successfully\n\n' +
+                    'Created:\n' +
+                    '- .claude/epics/     (for epic and task files)\n' +
+                    '- .claude/prds/      (for PRD files)\n' +
+                    '- .claude/memory_bank.md (audit trail)\n\n' +
+                    'Next steps:\n' +
+                    '1. Create a PRD: prd_new\n' +
+                    '2. Convert PRD to Epic: prd_parse\n' +
+                    '3. Decompose Epic into tasks: epic_decompose',
+            }],
+          };
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          await logError(
+            MemoryBankOperation.PM_INIT,
+            'Failed to initialize PM structure',
+            errorMessage,
+            { workingDir },
+            workingDir
+          );
+
+          return {
+            content: [{
+              type: 'text',
+              text: `❌ Failed to initialize PM structure\n\nError: ${errorMessage}`,
+            }],
+            isError: true,
+          };
+        }
+      }
+    );
+  }
+
+  /**
+   * Register PRD New Tool
+   * Create new Product Requirements Document
+   */
+  private registerPRDNew(): void {
+    this.registerTool(
+      'prd_new',
+      {
+        name: 'prd_new',
+        category: ToolCategory.PM,
+        description: 'Create new Product Requirements Document with guided template',
+        inputSchema: z.object({
+          featureName: z.string().min(1).describe('Feature name (kebab-case recommended)'),
+          executiveSummary: z.string().min(1).describe('High-level overview of the feature'),
+          problemStatement: z.string().min(1).describe('Core problem this feature solves'),
+          successCriteria: z.string().min(1).describe('Measurable success outcomes'),
+          userStories: z.string().min(1).describe('User stories (As a... I want... So that...)'),
+          acceptanceCriteria: z.string().min(1).describe('Testable requirements'),
+          outOfScope: z.string().optional().describe('What is NOT being built'),
+          technicalConsiderations: z.string().optional().describe('Technical notes and constraints'),
+        }),
+        context7Queries: [
+          'mcp://context7/product-management/prd-templates',
+          'mcp://context7/product-management/requirements',
+          'mcp://context7/agile/user-stories',
+          'mcp://context7/product-management/success-metrics',
+        ],
+        examples: [
+          {
+            description: 'Create PRD for user authentication feature',
+            input: {
+              featureName: 'user-authentication',
+              executiveSummary: 'Secure user authentication system with OAuth2 and JWT tokens',
+              problemStatement: 'Users need secure way to access the platform',
+              successCriteria: '95%+ uptime, <500ms auth response time',
+              userStories: 'As a user, I want to login securely, so that my data is protected',
+              acceptanceCriteria: 'Users can register, login, logout, reset password',
+            },
+            expectedOutput: 'PRD created at .claude/prds/user-authentication.md',
+          },
+        ],
+        version: '0.1.0',
+      },
+      async (params) => {
+        const featureName = sanitizeEpicName(params.featureName);
+
+        // Validate epic name
+        const validation = validateEpicName(featureName);
+        if (!validation.valid) {
+          return {
+            content: [{
+              type: 'text',
+              text: `❌ Invalid feature name: ${validation.error}\n\n` +
+                    `Original: ${params.featureName}\n` +
+                    `Sanitized: ${featureName}\n\n` +
+                    `Feature names must be lowercase alphanumeric with hyphens (e.g., user-authentication)`,
+            }],
+            isError: true,
+          };
+        }
+
+        try {
+          // Check if PRD already exists
+          const exists = await prdExists(featureName);
+          if (exists) {
+            return {
+              content: [{
+                type: 'text',
+                text: `⚠️  PRD already exists for feature: ${featureName}\n\n` +
+                      `Location: .claude/prds/${featureName}.md\n\n` +
+                      `Use prd_edit to modify existing PRD.`,
+              }],
+            };
+          }
+
+          // Create PRD frontmatter
+          const frontmatter = createPrdFrontmatter(featureName, {
+            status: 'draft',
+          });
+
+          // Build PRD content
+          const prdContent = `
+## Executive Summary
+${params.executiveSummary}
+
+## Problem Statement
+${params.problemStatement}
+
+## Success Criteria
+${params.successCriteria}
+
+## User Stories
+${params.userStories}
+
+## Acceptance Criteria
+${params.acceptanceCriteria}
+
+## Out of Scope
+${params.outOfScope || 'To be defined during implementation planning'}
+
+## Technical Considerations
+${params.technicalConsiderations || 'To be defined during technical design phase'}
+
+---
+*Created with GeminiAutoPM MCP Server*
+`;
+
+          // Combine frontmatter and content
+          const prdMarkdown = stringifyFrontmatter(frontmatter, prdContent);
+
+          // Write PRD file
+          const prdPath = getPrdFilePath(featureName);
+          await writeFile(prdPath, prdMarkdown);
+
+          // Log to memory bank
+          await logSuccess(
+            MemoryBankOperation.PRD_NEW,
+            `Created PRD for feature: ${featureName}`,
+            {
+              featureName,
+              status: frontmatter.status,
+              sections: ['Executive Summary', 'Problem Statement', 'Success Criteria', 'User Stories', 'Acceptance Criteria'],
+            }
+          );
+
+          return {
+            content: [{
+              type: 'text',
+              text: `✅ PRD created successfully\n\n` +
+                    `Feature: ${featureName}\n` +
+                    `Location: .claude/prds/${featureName}.md\n` +
+                    `Status: draft\n\n` +
+                    `Next steps:\n` +
+                    `1. Review and refine the PRD\n` +
+                    `2. Convert to Epic: prd_parse ${featureName}\n` +
+                    `3. Decompose into tasks: epic_decompose ${featureName}`,
+            }],
+          };
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          await logError(
+            MemoryBankOperation.PRD_NEW,
+            `Failed to create PRD for feature: ${featureName}`,
+            errorMessage,
+            { featureName }
+          );
+
+          return {
+            content: [{
+              type: 'text',
+              text: `❌ Failed to create PRD\n\nError: ${errorMessage}`,
+            }],
+            isError: true,
+          };
+        }
+      }
+    );
+  }
+
+  /**
+   * Register PRD Parse Tool
+   * Convert PRD to Epic
+   */
+  private registerPRDParse(): void {
+    this.registerTool(
+      'prd_parse',
+      {
+        name: 'prd_parse',
+        category: ToolCategory.PM,
+        description: 'Convert Product Requirements Document to technical implementation epic',
+        inputSchema: z.object({
+          featureName: z.string().min(1).describe('Feature name matching PRD file'),
+          technicalApproach: z.string().min(1).describe('Technical implementation approach and architecture'),
+          implementationPhases: z.string().min(1).describe('Implementation phases and timeline'),
+          dependencies: z.string().optional().describe('Technical dependencies and prerequisites'),
+        }),
+        context7Queries: [
+          'mcp://context7/product-management/prd-to-epic',
+          'mcp://context7/agile/epic-structure',
+          'mcp://context7/architecture/technical-design',
+          'mcp://context7/project-management/task-breakdown',
+          'mcp://context7/agile/estimation',
+        ],
+        examples: [
+          {
+            description: 'Convert authentication PRD to epic',
+            input: {
+              featureName: 'user-authentication',
+              technicalApproach: 'OAuth2 + JWT tokens, bcrypt password hashing, Redis session storage',
+              implementationPhases: 'Phase 1: User registration, Phase 2: Login/logout, Phase 3: Password reset',
+              dependencies: 'Redis, JWT library, OAuth2 provider integration',
+            },
+            expectedOutput: 'Epic created at .claude/epics/user-authentication/epic.md',
+          },
+        ],
+        version: '0.1.0',
+      },
+      async (params) => {
+        const featureName = sanitizeEpicName(params.featureName);
+
+        try {
+          // Check if PRD exists
+          const exists = await prdExists(featureName);
+          if (!exists) {
+            return {
+              content: [{
+                type: 'text',
+                text: `❌ PRD not found for feature: ${featureName}\n\n` +
+                      `Expected location: .claude/prds/${featureName}.md\n\n` +
+                      `Create PRD first using: prd_new`,
+              }],
+              isError: true,
+            };
+          }
+
+          // Read PRD
+          const prdPath = getPrdFilePath(featureName);
+          const prdMarkdown = await readFile(prdPath);
+          const prdData = parsePrdFrontmatter(prdMarkdown);
+
+          // Create epic directory
+          await createEpicDir(featureName);
+
+          // Create epic frontmatter
+          const epicFrontmatter = createEpicFrontmatter(featureName, {
+            status: 'open',
+            progress: 0,
+          });
+
+          // Build epic content
+          const epicContent = `
+## Overview
+Converted from PRD: ${featureName}
+
+## Technical Approach
+${params.technicalApproach}
+
+## Implementation Phases
+${params.implementationPhases}
+
+## Dependencies
+${params.dependencies || 'None specified'}
+
+## Success Criteria
+${prdData.content.includes('## Success Criteria')
+  ? prdData.content.split('## Success Criteria')[1]?.split('##')[0]?.trim()
+  : 'Inherited from PRD'}
+
+## Task Breakdown Preview
+*Use epic_decompose to break down into detailed tasks*
+
+---
+*Generated from PRD by GeminiAutoPM MCP Server*
+*Original PRD: .claude/prds/${featureName}.md*
+`;
+
+          // Combine frontmatter and content
+          const epicMarkdown = stringifyFrontmatter(epicFrontmatter, epicContent);
+
+          // Write epic file
+          const epicPath = getEpicFilePath(featureName);
+          await writeFile(epicPath, epicMarkdown);
+
+          // Update PRD status
+          // TODO: Implement PRD status update
+
+          // Log to memory bank
+          await logSuccess(
+            MemoryBankOperation.PRD_PARSE,
+            `Converted PRD to Epic: ${featureName}`,
+            {
+              featureName,
+              prdFile: `prds/${featureName}.md`,
+              epicFile: `epics/${featureName}/epic.md`,
+            }
+          );
+
+          return {
+            content: [{
+              type: 'text',
+              text: `✅ Epic created from PRD\n\n` +
+                    `Feature: ${featureName}\n` +
+                    `PRD: .claude/prds/${featureName}.md\n` +
+                    `Epic: .claude/epics/${featureName}/epic.md\n\n` +
+                    `Next steps:\n` +
+                    `1. Review epic structure\n` +
+                    `2. Decompose into tasks: epic_decompose ${featureName}\n` +
+                    `3. Start implementation: epic_start ${featureName}`,
+            }],
+          };
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          await logError(
+            MemoryBankOperation.PRD_PARSE,
+            `Failed to parse PRD: ${featureName}`,
+            errorMessage,
+            { featureName }
+          );
+
+          return {
+            content: [{
+              type: 'text',
+              text: `❌ Failed to convert PRD to Epic\n\nError: ${errorMessage}`,
+            }],
+            isError: true,
+          };
+        }
+      }
+    );
   }
 
   /**
